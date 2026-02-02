@@ -14,9 +14,9 @@ Personal configuration files for macOS.
 # Clone the repo
 git clone https://github.com/MiGrebin/dotfiles.git ~/dotfiles
 
-# Ghostty
-mkdir -p ~/.config/ghostty
-ln -sf ~/dotfiles/ghostty/config ~/.config/ghostty/config
+# Ghostty (macOS)
+mkdir -p "$HOME/Library/Application Support/com.mitchellh.ghostty"
+ln -sf ~/dotfiles/ghostty/config "$HOME/Library/Application Support/com.mitchellh.ghostty/config"
 
 # Tmux
 ln -sf ~/dotfiles/tmux/.tmux.conf ~/.tmux.conf

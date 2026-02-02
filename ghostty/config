@@ -1,0 +1,8 @@
+theme = TokyoNight Storm
+keybind = ctrl+cmd+page_down=scroll_page_down
+keybind = ctrl+cmd+page_up=scroll_page_up
+font-family = "0xProto Nerd Font Mono"
+font-size = 20
+
+shell-integration = detect
+shell-integration-features = cursor,sudo,title

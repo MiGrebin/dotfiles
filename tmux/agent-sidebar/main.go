@@ -18,6 +18,7 @@ var (
 	projectStyle  = lipgloss.NewStyle().Bold(true).PaddingTop(1)
 	selectedStyle = lipgloss.NewStyle().Reverse(true)
 	attnStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	attnDimStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")).Faint(true)
 	busyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	doneStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 	dimStyle      = lipgloss.NewStyle().Faint(true)
@@ -38,9 +39,11 @@ type model struct {
 	selected int
 	width    int
 	height   int
+	blinkOn  bool
 }
 
 type refreshMsg []agent
+type blinkMsg struct{}
 
 func doRefresh() tea.Msg {
 	return refreshMsg(fetchAgents())
@@ -52,8 +55,14 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+func blinkCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return blinkMsg{}
+	})
+}
+
 func (m model) Init() tea.Cmd {
-	return tea.Batch(doRefresh, tickCmd())
+	return tea.Batch(doRefresh, tickCmd(), blinkCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -85,6 +94,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		}
+
+	case blinkMsg:
+		m.blinkOn = !m.blinkOn
+		return m, blinkCmd()
 
 	case refreshMsg:
 		m.agents = []agent(msg)
@@ -141,12 +154,21 @@ func (m model) View() string {
 
 		if i == m.selected {
 			line := fmt.Sprintf(" ▸ %s  %s", stateText, label)
-			b.WriteString(selectedStyle.Width(m.width).Render(line))
+			if a.state == "attention" && m.blinkOn {
+				// Blink: show selected style but dim the text
+				b.WriteString(selectedStyle.Width(m.width).Faint(true).Render(line))
+			} else {
+				b.WriteString(selectedStyle.Width(m.width).Render(line))
+			}
 		} else {
 			var coloredState string
 			switch a.state {
 			case "attention":
-				coloredState = attnStyle.Render(stateText)
+				if m.blinkOn {
+					coloredState = attnStyle.Render(stateText)
+				} else {
+					coloredState = attnDimStyle.Render(stateText)
+				}
 			case "done":
 				coloredState = doneStyle.Render(stateText)
 			default:
@@ -169,18 +191,25 @@ func fetchAgents() []agent {
 	}
 
 	paneList := ""
-	states := map[string]string{}
+	pluginStates := map[string]string{}
+	hookStates := map[string]string{}
 
 	for _, line := range strings.Split(string(optOut), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "@agent_notify_all_panes ") {
 			paneList = strings.TrimPrefix(line, "@agent_notify_all_panes ")
 			paneList = strings.Trim(paneList, "\"")
+		} else if strings.HasPrefix(line, "@agent_hook_state_") {
+			parts := strings.SplitN(line, " ", 2)
+			if len(parts) == 2 {
+				suffix := strings.TrimPrefix(parts[0], "@agent_hook_state_")
+				hookStates[suffix] = strings.Trim(parts[1], "\"")
+			}
 		} else if strings.HasPrefix(line, "@agent_notify_state_") {
 			parts := strings.SplitN(line, " ", 2)
 			if len(parts) == 2 {
 				suffix := strings.TrimPrefix(parts[0], "@agent_notify_state_")
-				states[suffix] = strings.Trim(parts[1], "\"")
+				pluginStates[suffix] = strings.Trim(parts[1], "\"")
 			}
 		}
 	}
@@ -211,15 +240,14 @@ func fetchAgents() []agent {
 	}
 
 	// 3. Build agent list
-	tracked := map[string]bool{}
-	for _, id := range paneIDs {
-		tracked[id] = true
-	}
-
 	var agents []agent
 	for _, paneID := range paneIDs {
 		suffix := strings.TrimPrefix(paneID, "%")
-		state := states[suffix]
+		// Hook state takes priority over plugin state
+		state := hookStates[suffix]
+		if state == "" {
+			state = pluginStates[suffix]
+		}
 
 		info, ok := paneInfoMap[paneID]
 		if !ok {
@@ -273,7 +301,7 @@ func resolveProjectName(path, sessionName string) string {
 }
 
 func main() {
-	p := tea.NewProgram(model{}, tea.WithAltScreen())
+	p := tea.NewProgram(model{blinkOn: true}, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

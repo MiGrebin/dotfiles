@@ -12,14 +12,17 @@ set -euo pipefail
 #
 # Usage: worktree_dev.sh <branch-name>
 
-pane_path="$(tmux display-message -p '#{pane_current_path}')"
-
-# Resolve the real project root (not a worktree root)
-if ! git_common="$(git -C "$pane_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
-  tmux display-message "Not in a git repository"
-  exit 1
+# Accept optional project root as second argument (used by worktree-picker)
+if [[ -n "${2:-}" ]]; then
+  project_root="$2"
+else
+  pane_path="$(tmux display-message -p '#{pane_current_path}')"
+  if ! git_common="$(git -C "$pane_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    tmux display-message "Not in a git repository"
+    exit 1
+  fi
+  project_root="$(cd "$git_common/.." && pwd)"
 fi
-project_root="$(cd "$git_common/.." && pwd)"
 
 branch_name="${1:-}"
 if [[ -z "$branch_name" ]]; then

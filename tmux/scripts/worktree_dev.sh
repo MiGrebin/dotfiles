@@ -57,8 +57,8 @@ tmux new-window -n "$dir_name" -c "$worktree_dir"
 # Pane 2: split right from pane 1, takes 65% (leaving 35% for nvim)
 tmux split-window -h -l 65% -c "$worktree_dir"
 
-# Pane 3: split right from pane 2, takes 22% of the window (~15% total for sidebar)
-tmux split-window -h -l 22% -c "$worktree_dir"
+# Pane 3: split right from pane 2, takes 30% for sidebar
+tmux split-window -h -l 30% -c "$worktree_dir"
 
 # Wait for shells to initialize before sending commands
 sleep 0.5

@@ -17,8 +17,8 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true)
 	projectStyle  = lipgloss.NewStyle().Bold(true).PaddingTop(1)
 	selectedStyle = lipgloss.NewStyle().Reverse(true)
-	attnStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	attnBgStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("3"))
+	attnStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	attnDimStyle = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("1"))
 	busyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	doneStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 	dimStyle      = lipgloss.NewStyle().Faint(true)
@@ -45,6 +45,7 @@ type model struct {
 	blinkOn        bool
 	currentSession string
 	currentWindow  string
+	lastRefresh    time.Time
 }
 
 type refreshMsg struct {
@@ -121,14 +122,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case blinkMsg:
-		m.blinkOn = !m.blinkOn
+		hasAttn := false
+		for _, a := range m.agents {
+			if a.state == "attention" {
+				hasAttn = true
+				break
+			}
+		}
+		if hasAttn {
+			m.blinkOn = !m.blinkOn
+		}
 		return m, blinkCmd()
 
 	case signalMsg:
-		// Hook signaled a state change — refresh immediately, then wait for next signal
+		// Throttle: skip refresh if last one was <500ms ago
+		if time.Since(m.lastRefresh) < 500*time.Millisecond {
+			return m, waitForSignal
+		}
 		return m, tea.Batch(doRefresh, waitForSignal)
 
 	case refreshMsg:
+		m.lastRefresh = time.Now()
 		m.agents = msg.agents
 		m.currentSession = msg.session
 		m.currentWindow = msg.window
@@ -191,25 +205,22 @@ func (m model) View() string {
 
 		if i == m.selected {
 			line := fmt.Sprintf(" ▸ %s  %s%s", stateText, label, marker)
-			if a.state == "attention" && m.blinkOn {
-				b.WriteString(attnBgStyle.Reverse(true).Width(m.width).Render(line))
-			} else {
-				b.WriteString(selectedStyle.Width(m.width).Render(line))
-			}
+			b.WriteString(selectedStyle.Width(m.width).Render(line))
 		} else {
-			if a.state == "attention" && m.blinkOn {
-				line := fmt.Sprintf("   %s  %s%s", stateText, label, marker)
-				b.WriteString(attnBgStyle.Width(m.width).Render(line))
-			} else {
-				switch a.state {
-				case "attention":
-					b.WriteString(fmt.Sprintf("   %s  %s%s", attnStyle.Render(stateText), label, marker))
-				case "done":
-					b.WriteString(fmt.Sprintf("   %s  %s%s", doneStyle.Render(stateText), label, marker))
-				default:
-					b.WriteString(fmt.Sprintf("   %s  %s%s", busyStyle.Render(stateText), label, marker))
+			var coloredState string
+			switch a.state {
+			case "attention":
+				if m.blinkOn {
+					coloredState = attnStyle.Render(stateText)
+				} else {
+					coloredState = attnDimStyle.Render(stateText)
 				}
+			case "done":
+				coloredState = doneStyle.Render(stateText)
+			default:
+				coloredState = busyStyle.Render(stateText)
 			}
+			b.WriteString(fmt.Sprintf("   %s  %s%s", coloredState, label, marker))
 		}
 		b.WriteString("\n")
 	}
@@ -285,9 +296,10 @@ func fetchAgents() []agent {
 		if state == "" {
 			state = pluginState
 		}
-		// Plugin "attention" overrides hook "busy" because hooks can't
-		// detect AskUserQuestion prompts — only the plugin's regex can
-		if pluginState == "attention" {
+		// Plugin "attention" overrides hook "busy" (hooks can't detect
+		// AskUserQuestion), but never overrides "done" (plugin regex
+		// can false-positive on visible terminal text)
+		if pluginState == "attention" && hookState != "done" {
 			state = "attention"
 		}
 

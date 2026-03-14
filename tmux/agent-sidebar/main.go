@@ -17,8 +17,8 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true)
 	projectStyle  = lipgloss.NewStyle().Bold(true).PaddingTop(1)
 	selectedStyle = lipgloss.NewStyle().Reverse(true)
-	attnStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	attnDimStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")).Faint(true)
+	attnStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	attnBgStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("3"))
 	busyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	doneStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 	dimStyle      = lipgloss.NewStyle().Faint(true)
@@ -155,26 +155,24 @@ func (m model) View() string {
 		if i == m.selected {
 			line := fmt.Sprintf(" ▸ %s  %s", stateText, label)
 			if a.state == "attention" && m.blinkOn {
-				// Blink: show selected style but dim the text
-				b.WriteString(selectedStyle.Width(m.width).Faint(true).Render(line))
+				b.WriteString(attnBgStyle.Reverse(true).Width(m.width).Render(line))
 			} else {
 				b.WriteString(selectedStyle.Width(m.width).Render(line))
 			}
 		} else {
-			var coloredState string
-			switch a.state {
-			case "attention":
-				if m.blinkOn {
-					coloredState = attnStyle.Render(stateText)
-				} else {
-					coloredState = attnDimStyle.Render(stateText)
+			line := fmt.Sprintf("   %s  %s", stateText, label)
+			if a.state == "attention" && m.blinkOn {
+				b.WriteString(attnBgStyle.Width(m.width).Render(line))
+			} else {
+				switch a.state {
+				case "attention":
+					b.WriteString(fmt.Sprintf("   %s  %s", attnStyle.Render(stateText), label))
+				case "done":
+					b.WriteString(fmt.Sprintf("   %s  %s", doneStyle.Render(stateText), label))
+				default:
+					b.WriteString(fmt.Sprintf("   %s  %s", busyStyle.Render(stateText), label))
 				}
-			case "done":
-				coloredState = doneStyle.Render(stateText)
-			default:
-				coloredState = busyStyle.Render(stateText)
 			}
-			b.WriteString(fmt.Sprintf("   %s  %s", coloredState, label))
 		}
 		b.WriteString("\n")
 	}

@@ -17,12 +17,15 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true)
 	projectStyle  = lipgloss.NewStyle().Bold(true).PaddingTop(1)
 	selectedStyle = lipgloss.NewStyle().Reverse(true)
-	attnStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
-	attnBgStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("3"))
+	attnStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+	attnBgStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("3"))
 	busyStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("4"))
 	doneStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
 	dimStyle      = lipgloss.NewStyle().Faint(true)
+	currentMarker = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Render(" ◀")
 )
+
+const signalChannel = "agent-sidebar-refresh"
 
 type agent struct {
 	project     string
@@ -35,22 +38,44 @@ type agent struct {
 }
 
 type model struct {
-	agents   []agent
-	selected int
-	width    int
-	height   int
-	blinkOn  bool
+	agents         []agent
+	selected       int
+	width          int
+	height         int
+	blinkOn        bool
+	currentSession string
+	currentWindow  string
 }
 
-type refreshMsg []agent
+type refreshMsg struct {
+	agents  []agent
+	session string
+	window  string
+}
 type blinkMsg struct{}
+type signalMsg struct{}
 
 func doRefresh() tea.Msg {
-	return refreshMsg(fetchAgents())
+	session := ""
+	window := ""
+	if out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}|#{window_index}").Output(); err == nil {
+		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+		if len(parts) == 2 {
+			session = parts[0]
+			window = parts[1]
+		}
+	}
+	return refreshMsg{agents: fetchAgents(), session: session, window: window}
 }
 
-func tickCmd() tea.Cmd {
-	return tea.Tick(3*time.Second, func(time.Time) tea.Msg {
+// waitForSignal blocks until the tmux wait-for channel is signaled.
+func waitForSignal() tea.Msg {
+	exec.Command("tmux", "wait-for", signalChannel).Run()
+	return signalMsg{}
+}
+
+func slowTickCmd() tea.Cmd {
+	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
 		return doRefresh()
 	})
 }
@@ -62,7 +87,7 @@ func blinkCmd() tea.Cmd {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(doRefresh, tickCmd(), blinkCmd())
+	return tea.Batch(doRefresh, waitForSignal, slowTickCmd(), blinkCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -99,12 +124,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blinkOn = !m.blinkOn
 		return m, blinkCmd()
 
+	case signalMsg:
+		// Hook signaled a state change — refresh immediately, then wait for next signal
+		return m, tea.Batch(doRefresh, waitForSignal)
+
 	case refreshMsg:
-		m.agents = []agent(msg)
+		m.agents = msg.agents
+		m.currentSession = msg.session
+		m.currentWindow = msg.window
 		if m.selected >= len(m.agents) {
 			m.selected = max(0, len(m.agents)-1)
 		}
-		return m, tickCmd()
+		return m, slowTickCmd()
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -152,25 +183,31 @@ func (m model) View() string {
 			label = fmt.Sprintf("%s:%s.%s", a.session, a.windowIndex, a.paneIndex)
 		}
 
+		isCurrent := a.session == m.currentSession && a.windowIndex == m.currentWindow
+		marker := ""
+		if isCurrent {
+			marker = currentMarker
+		}
+
 		if i == m.selected {
-			line := fmt.Sprintf(" ▸ %s  %s", stateText, label)
+			line := fmt.Sprintf(" ▸ %s  %s%s", stateText, label, marker)
 			if a.state == "attention" && m.blinkOn {
 				b.WriteString(attnBgStyle.Reverse(true).Width(m.width).Render(line))
 			} else {
 				b.WriteString(selectedStyle.Width(m.width).Render(line))
 			}
 		} else {
-			line := fmt.Sprintf("   %s  %s", stateText, label)
 			if a.state == "attention" && m.blinkOn {
+				line := fmt.Sprintf("   %s  %s%s", stateText, label, marker)
 				b.WriteString(attnBgStyle.Width(m.width).Render(line))
 			} else {
 				switch a.state {
 				case "attention":
-					b.WriteString(fmt.Sprintf("   %s  %s", attnStyle.Render(stateText), label))
+					b.WriteString(fmt.Sprintf("   %s  %s%s", attnStyle.Render(stateText), label, marker))
 				case "done":
-					b.WriteString(fmt.Sprintf("   %s  %s", doneStyle.Render(stateText), label))
+					b.WriteString(fmt.Sprintf("   %s  %s%s", doneStyle.Render(stateText), label, marker))
 				default:
-					b.WriteString(fmt.Sprintf("   %s  %s", busyStyle.Render(stateText), label))
+					b.WriteString(fmt.Sprintf("   %s  %s%s", busyStyle.Render(stateText), label, marker))
 				}
 			}
 		}
@@ -189,8 +226,8 @@ func fetchAgents() []agent {
 	}
 
 	paneList := ""
-	pluginStates := map[string]string{}
 	hookStates := map[string]string{}
+	pluginStates := map[string]string{}
 
 	for _, line := range strings.Split(string(optOut), "\n") {
 		line = strings.TrimSpace(line)
@@ -241,10 +278,17 @@ func fetchAgents() []agent {
 	var agents []agent
 	for _, paneID := range paneIDs {
 		suffix := strings.TrimPrefix(paneID, "%")
-		// Hook state takes priority over plugin state
-		state := hookStates[suffix]
+		hookState := hookStates[suffix]
+		pluginState := pluginStates[suffix]
+		// Hook state is primary, plugin state as fallback
+		state := hookState
 		if state == "" {
-			state = pluginStates[suffix]
+			state = pluginState
+		}
+		// Plugin "attention" overrides hook "busy" because hooks can't
+		// detect AskUserQuestion prompts — only the plugin's regex can
+		if pluginState == "attention" {
+			state = "attention"
 		}
 
 		info, ok := paneInfoMap[paneID]

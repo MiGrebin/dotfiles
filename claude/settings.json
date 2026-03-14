@@ -11,11 +11,11 @@
   "hooks": {
     "Notification": [
       {
-        "matcher": "permission_prompt|elicitation_dialog",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" attention 2>/dev/null || true"
+            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" attention 2>/dev/null; tmux wait-for -S agent-sidebar-refresh 2>/dev/null || true"
           }
         ]
       }
@@ -26,18 +26,29 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" busy 2>/dev/null || true"
+            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" busy 2>/dev/null; tmux wait-for -S agent-sidebar-refresh 2>/dev/null || true"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" attention 2>/dev/null; tmux wait-for -S agent-sidebar-refresh 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" busy 2>/dev/null || true"
+            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" busy 2>/dev/null; tmux wait-for -S agent-sidebar-refresh 2>/dev/null || true"
           }
         ]
       }
@@ -48,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" done 2>/dev/null || true"
+            "command": "tmux set-option -gq \"@agent_hook_state_${TMUX_PANE#%}\" done 2>/dev/null; tmux wait-for -S agent-sidebar-refresh 2>/dev/null || true"
           }
         ]
       }

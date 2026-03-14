@@ -27,35 +27,24 @@ type worktree struct {
 }
 
 type model struct {
-	worktrees   []worktree
-	filtered    []worktree
-	input       string
-	selected    int
-	width       int
-	height      int
-	projectRoot string
-	err         error
+	worktrees      []worktree
+	filtered       []worktree
+	input          string
+	selected       int
+	width          int
+	height         int
+	projectRoot    string
+	err            error
+	confirmDelete  string // name of worktree pending deletion
 }
 
-func initialModel() model {
-	// Resolve project root from cwd (set by popup's -d flag)
-	cwd, _ := os.Getwd()
-
-	gitCommonOut, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
-	if err != nil {
-		return model{err: fmt.Errorf("not in a git repository")}
-	}
-	projectRoot := filepath.Dir(strings.TrimSpace(string(gitCommonOut)))
-
-	// Get current session
-	sessionOut, _ := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
-	session := strings.TrimSpace(string(sessionOut))
-
-	// List existing worktrees
+func loadWorktrees(projectRoot string) []worktree {
 	worktreeDir := filepath.Join(projectRoot, ".worktrees")
 	entries, _ := os.ReadDir(worktreeDir)
 
-	// Get existing window names in this session
+	sessionOut, _ := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	session := strings.TrimSpace(string(sessionOut))
+
 	windowsOut, _ := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
 	windowNames := map[string]bool{}
 	for _, name := range strings.Split(string(windowsOut), "\n") {
@@ -75,9 +64,20 @@ func initialModel() model {
 			})
 		}
 	}
+	return worktrees
+}
+
+func initialModel() model {
+	cwd, _ := os.Getwd()
+
+	gitCommonOut, err := exec.Command("git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	if err != nil {
+		return model{err: fmt.Errorf("not in a git repository")}
+	}
+	projectRoot := filepath.Dir(strings.TrimSpace(string(gitCommonOut)))
 
 	m := model{
-		worktrees:   worktrees,
+		worktrees:   loadWorktrees(projectRoot),
 		projectRoot: projectRoot,
 	}
 	m.filtered = m.applyFilter()
@@ -104,6 +104,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
+		// Confirmation dialog intercepts all keys
+		if m.confirmDelete != "" {
+			switch msg.String() {
+			case "y", "Y", "enter":
+				name := m.confirmDelete
+				m.confirmDelete = ""
+				// Close tmux window if open
+				sessionOut, _ := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+				session := strings.TrimSpace(string(sessionOut))
+				exec.Command("tmux", "kill-window", "-t", session+":="+name).Run()
+				// Remove git worktree (try git first, fall back to rm)
+				worktreePath := filepath.Join(m.projectRoot, ".worktrees", name)
+				if err := exec.Command("git", "-C", m.projectRoot, "worktree", "remove", worktreePath, "--force").Run(); err != nil {
+					os.RemoveAll(worktreePath)
+					exec.Command("git", "-C", m.projectRoot, "worktree", "prune").Run()
+				}
+				// Rebuild list
+				m.worktrees = loadWorktrees(m.projectRoot)
+				m.filtered = m.applyFilter()
+				m.clampSelected()
+			default:
+				m.confirmDelete = ""
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
@@ -125,7 +151,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			var name string
 			if m.showCreateOption() && m.selected == len(m.filtered) {
-				// "Create new" option selected
 				name = m.input
 			} else if m.selected < len(m.filtered) {
 				name = m.filtered[m.selected].name
@@ -136,6 +161,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				script := filepath.Join(home, "dotfiles/tmux/scripts/worktree_dev.sh")
 				exec.Command(script, name, m.projectRoot).Run()
 				return m, tea.Quit
+			}
+
+		case "ctrl+x":
+			if m.selected < len(m.filtered) {
+				m.confirmDelete = m.filtered[m.selected].name
 			}
 
 		case "backspace":
@@ -245,8 +275,15 @@ func (m model) View() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(hintStyle.Render("  ↑↓ navigate  ⏎ select  esc quit"))
-	b.WriteString("\n")
+	if m.confirmDelete != "" {
+		deleteWarn := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1"))
+		b.WriteString("\n")
+		b.WriteString(deleteWarn.Render(fmt.Sprintf("  Delete \"%s\"? (y/n)", m.confirmDelete)))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(hintStyle.Render("  ↑↓ navigate  ⏎ select  ^x delete  esc quit"))
+		b.WriteString("\n")
+	}
 
 	return b.String()
 }

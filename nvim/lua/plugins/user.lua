@@ -103,6 +103,18 @@ return {
             end,
             desc = "Open file in tmux popup",
           },
+          ["<2-LeftMouse>"] = {
+            function(state)
+              local node = state.tree:get_node()
+              if node.type == "file" then
+                local path = node:get_id()
+                vim.fn.system("tmux display-popup -xC -yC -w80% -h80% -E 'nvim \"" .. path .. "\"'")
+              else
+                require("neo-tree.sources.filesystem.commands").toggle_node(state)
+              end
+            end,
+            desc = "Double-click open in tmux popup",
+          },
         },
       },
     },

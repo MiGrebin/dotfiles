@@ -1,8 +1,29 @@
-theme = TokyoNight Storm
+background = #010409
+foreground = #e6edf3
+selection-background = #264f78
+selection-foreground = #e6edf3
+cursor-color = #e6edf3
+cursor-text = #010409
+palette = 0=#484f58
+palette = 1=#ff7b72
+palette = 2=#3fb950
+palette = 3=#d29922
+palette = 4=#58a6ff
+palette = 5=#bc8cff
+palette = 6=#39c5cf
+palette = 7=#b1bac4
+palette = 8=#6e7681
+palette = 9=#ffa198
+palette = 10=#56d364
+palette = 11=#e3b341
+palette = 12=#79c0ff
+palette = 13=#d2a8ff
+palette = 14=#56d4dd
+palette = 15=#ffffff
 keybind = ctrl+cmd+page_down=scroll_page_down
 keybind = ctrl+cmd+page_up=scroll_page_up
 font-family = "0xProto Nerd Font Mono"
-font-size = 20
+font-size = 16
 
 shell-integration = detect
 shell-integration-features = cursor,sudo,title

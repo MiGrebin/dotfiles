@@ -88,36 +88,58 @@ return {
   },
   {
     "nvim-neo-tree/neo-tree.nvim",
-    opts = {
-      window = {
-        mappings = {
-          ["<cr>"] = {
-            function(state)
-              local node = state.tree:get_node()
-              if node.type == "file" then
-                local path = node:get_id()
-                vim.fn.system("tmux display-popup -xC -yC -w80% -h80% -E 'nvim \"" .. path .. "\"'")
-              else
-                require("neo-tree.sources.filesystem.commands").toggle_node(state)
-              end
-            end,
-            desc = "Open file in tmux popup",
-          },
-          ["<2-LeftMouse>"] = {
-            function(state)
-              local node = state.tree:get_node()
-              if node.type == "file" then
-                local path = node:get_id()
-                vim.fn.system("tmux display-popup -xC -yC -w80% -h80% -E 'nvim \"" .. path .. "\"'")
-              else
-                require("neo-tree.sources.filesystem.commands").toggle_node(state)
-              end
-            end,
-            desc = "Double-click open in tmux popup",
-          },
-        },
-      },
-    },
+    opts = function(_, opts)
+      local image_exts = { png = true, jpg = true, jpeg = true, gif = true, bmp = true, webp = true, svg = true, ico = true, tiff = true }
+      local video_exts = { mov = true, mp4 = true, m4v = true, avi = true }
+      local function open_node(state)
+        local node = state.tree:get_node()
+        if node.type == "file" then
+          local path = node:get_id()
+          local ext = path:match("%.(%w+)$")
+          if ext and image_exts[ext:lower()] then
+            vim.fn.system('open -a Preview "' .. path .. '"')
+          elseif ext and video_exts[ext:lower()] then
+            vim.fn.system('open -a "QuickTime Player" "' .. path .. '"')
+          else
+            vim.fn.system("tmux display-popup -xC -yC -w80% -h80% -E 'nvim \"" .. path .. "\"'")
+          end
+        else
+          require("neo-tree.sources.filesystem.commands").toggle_node(state)
+        end
+      end
+      local function context_menu(state)
+        local node = state.tree:get_node()
+        if node.type ~= "file" then return end
+        local path = node:get_id()
+        local ext = path:match("%.(%w+)$") or ""
+        local actions = {
+          { label = "Open in tmux popup", action = function() vim.fn.system("tmux display-popup -xC -yC -w80% -h80% -E 'nvim \"" .. path .. "\"'") end },
+          { label = "Copy path", action = function() vim.fn.setreg("+", path) vim.notify("Copied: " .. path) end },
+        }
+        if ext:lower() == "html" then
+          table.insert(actions, 1, { label = "Open in browser", action = function() vim.fn.system('open "' .. path .. '"') end })
+        end
+        if image_exts[ext:lower()] then
+          table.insert(actions, 1, { label = "Open in Preview", action = function() vim.fn.system('open -a Preview "' .. path .. '"') end })
+        end
+        if video_exts[ext:lower()] then
+          table.insert(actions, 1, { label = "Open in QuickTime", action = function() vim.fn.system('open -a "QuickTime Player" "' .. path .. '"') end })
+        end
+        vim.ui.select(
+          vim.tbl_map(function(a) return a.label end, actions),
+          { prompt = node.name },
+          function(_, idx) if idx then actions[idx].action() end end
+        )
+      end
+      opts.window = opts.window or {}
+      opts.window.mappings = vim.tbl_deep_extend("force", opts.window.mappings or {}, {
+        ["<cr>"] = { open_node, desc = "Open file in tmux popup / Preview for images" },
+        ["<2-LeftMouse>"] = { open_node, desc = "Double-click open" },
+        ["<RightMouse>"] = { context_menu, desc = "Context menu" },
+        ["X"] = { context_menu, desc = "Context menu" },
+      })
+      return opts
+    end,
   },
   {
     "neovim/nvim-lspconfig",
